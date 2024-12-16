@@ -2,7 +2,7 @@ import asyncio
 import json
 import imaplib
 import email
-from typing import List, Dict
+from typing import List, Dict, Optional
 from telebot.async_telebot import AsyncTeleBot
 import bitget.v2.spot.order_api as spotOrderApi
 import bitget.v2.spot.account_api as spotAccountApi
@@ -10,7 +10,8 @@ import bitget.v2.spot.market_api as spotMarketApi
 import creds
 from dataclasses import dataclass
 from bitget_functions import OrderManager, AssetManager, BillAnalyzer
-import nest_asyncio
+from datetime import datetime as dt
+#import nest_asyncio
 
 @dataclass
 class TradingSettings:
@@ -79,6 +80,13 @@ class TradingBot:
             creds.IMAP_SERVER, creds.EMAIL_USERNAME, creds.EMAIL_PASSWORD
         )
         self.config = ConfigManager()
+        self.signal_processor = TradingSignalProcessor(
+            self.bot,
+            self.order_manager,
+            self.asset_manager,
+            self.bill_analyzer,
+            self.config
+        )
 
     async def setup_bot_commands(self):
         @self.bot.message_handler(commands=["start", "help"])
@@ -142,7 +150,7 @@ class TradingBot:
             market_info = self.config.read_json()
             messages = await self.email_monitor.get_trading_signals()
             for msg in messages:
-                await self.process_trading_signal(msg, market_info)
+                await self.signal_processor.process_trading_signal(msg, market_info)
             await asyncio.sleep(300)
 
     async def start(self):
@@ -151,7 +159,156 @@ class TradingBot:
         polling_task = asyncio.create_task(self.bot.infinity_polling())
         await asyncio.gather(loop_task, polling_task)
 
-nest_asyncio.apply()  # Патчинг для работы в Jupyter Notebook
+class TradingSignalProcessor:
+    def __init__(self, bot, order_manager, asset_manager, bill_analyzer, config):
+        self.bot = bot
+        self.order_manager = order_manager
+        self.asset_manager = asset_manager
+        self.bill_analyzer = bill_analyzer
+        self.config = config
+
+    async def process_trading_signal(self, message: str, market_info: List[dict]) -> None:
+        """Основной метод обработки торговых сигналов"""
+        coin_info = self._find_coin_info(message, market_info)
+        if not coin_info:
+            return
+
+        signal_parts = message.split(" @ ")
+        if "sell" in message:
+            await self._handle_sell_signal(coin_info, signal_parts, market_info)
+        elif "buy" in message:
+            await self._handle_buy_signal(coin_info, market_info)
+
+    def _find_coin_info(self, message: str, market_info: List[dict]) -> Optional[dict]:
+        """Поиск информации о монете из сигнала"""
+        return next(
+            (info for info in market_info if info["coin"] in message),
+            None
+        )
+
+    async def _handle_sell_signal(
+        self, 
+        coin_info: dict, 
+        signal_parts: List[str], 
+        market_info: List[dict]
+    ) -> None:
+        """Обработка сигнала на продажу"""
+        if not coin_info["in_trade"]:
+            return
+
+        quantity = await self._prepare_sell_quantity(coin_info)
+        if not quantity:
+            return
+
+        success = await self._execute_sell_order(coin_info, quantity, market_info)
+        if success and len(signal_parts) == 3:
+            await self._send_sell_notification(signal_parts[0])
+
+    async def _prepare_sell_quantity(self, coin_info: dict) -> Optional[float]:
+        """Подготовка количества для продажи"""
+        try:
+            quantity = self.asset_manager.get_asset_quantity(coin_info["coin"])
+            return self.order_manager.round_down(float(quantity), coin_info["decimals"])
+        except Exception as e:
+            print(f"Ошибка при подготовке количества для продажи: {e}")
+            return None
+
+    async def _execute_sell_order(
+        self, 
+        coin_info: dict, 
+        quantity: float, 
+        market_info: List[dict]
+    ) -> bool:
+        """Выполнение ордера на продажу"""
+        try:
+            order_id = await self.order_manager.sell(coin_info["coin"], quantity)
+            if order_id:
+                coin_info["in_trade"] = False
+                self.config.write_json(market_info)
+                return True
+            return False
+        except Exception as e:
+            print(f"Ошибка при выполнении ордера на продажу: {e}")
+            return False
+
+    async def _send_sell_notification(self, coin_signal: str) -> None:
+        """Отправка уведомления о продаже"""
+        try:
+            stats, _ = await self.bill_analyzer.process_bills(10)
+            if stats:
+                for stat in reversed(stats):
+                    if coin_signal in stat["coin"]:
+                        info_message = self.bill_analyzer.format_trade_statistics(stat)
+                        await self.bot.send_message(creds.TELEGRAM_ID, info_message)
+                        break
+        except Exception as e:
+            print(f"Ошибка при отправке уведомления о продаже: {e}")
+            self.bot.send_message(creds.TELEGRAM_ID, f"Ошибка при отправке уведомления о продаже: {e}")
+
+    async def _handle_buy_signal(self, coin_info: dict, market_info: List[dict]) -> None:
+        """Обработка сигнала на покупку"""
+        if coin_info["in_trade"]:
+            return
+
+        trade_amount = await self._calculate_trade_amount(market_info)
+        if not trade_amount:
+            return
+
+        success = await self._execute_buy_order(coin_info, trade_amount, market_info)
+        if success:
+            await self._send_buy_notification(coin_info, trade_amount)
+
+    async def _calculate_trade_amount(self, market_info: List[dict]) -> Optional[float]:
+        """Расчет суммы для торговли"""
+        try:
+            settings = self.config.read_json("settings")
+            usdt_balance = self.asset_manager.get_asset_quantity("USDT")
+
+            if (not settings or not settings.get("useFixDeposit", False)):
+                coins_not_in_trade = sum(1 for coin in market_info if not coin["in_trade"])
+                coef = 0.95 / max(coins_not_in_trade, 1)
+                amount = self.order_manager.round_down(float(usdt_balance) * coef, 2)
+            else:
+                amount = float(settings["fixDeposit"])
+
+            return max(amount, 5.02)
+        except Exception as e:
+            print(f"Ошибка при расчете суммы для торговли: {e}")
+            self.bot.send_message(creds.TELEGRAM_ID, f"Ошибка при расчете суммы для торговли: {e}")
+            return None
+
+    async def _execute_buy_order(
+        self, 
+        coin_info: dict, 
+        amount: float, 
+        market_info: List[dict]
+    ) -> bool:
+        """Выполнение ордера на покупку"""
+        try:
+            order_id = await self.order_manager.buy(coin_info["coin"], amount)
+            if order_id:
+                coin_info["in_trade"] = True
+                self.config.write_json(market_info)
+                return True
+            return False
+        except Exception as e:
+            print(f"Ошибка при выполнении ордера на покупку: {e}")
+            self.bot.send_message(creds.TELEGRAM_ID, f"Ошибка при выполнении ордера на покупку: {e}")
+            return False
+
+    async def _send_buy_notification(self, coin_info: dict, amount: float) -> None:
+        """Отправка уведомления о покупке"""
+        try:
+            info_message = (
+                f"📅{dt.now().strftime('%d.%m.%Y %H:%M')}\n"
+                f"📈{coin_info['coin']} - открыли сделку на {amount} USDT\n"
+            )
+            await self.bot.send_message(creds.TELEGRAM_ID, info_message)
+        except Exception as e:
+            print(f"Ошибка при отправке уведомления о покупке: {e}")
+            self.bot.send_message(creds.TELEGRAM_ID, f"Ошибка при отправке уведомления о покупке: {e}")
+
+#nest_asyncio.apply()  # Патчинг для работы в Jupyter Notebook
 
 if __name__ == "__main__":
     bot = TradingBot()
