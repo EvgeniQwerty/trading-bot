@@ -1,0 +1,5 @@
+{
+    "useFixDeposit": true,
+    "fixDeposit": 8,
+    "language": "ru" //"ru" или "en"
+}
