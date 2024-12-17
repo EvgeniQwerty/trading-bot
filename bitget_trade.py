@@ -186,42 +186,29 @@ class TradingSignalProcessor:
             None
         )
 
-    async def _handle_sell_signal(
-        self, 
-        coin_info: dict, 
-        signal_parts: List[str], 
-        market_info: List[dict]
-    ) -> None:
-        """Обработка сигнала на продажу"""
+    async def _handle_sell_signal(self, coin_info: dict, signal_parts: List[str], market_info: List[dict]) -> None:
         if not coin_info["in_trade"]:
             return
 
-        quantity = await self._prepare_sell_quantity(coin_info)
+        quantity = self._prepare_sell_quantity(coin_info)
         if not quantity:
             return
 
-        success = await self._execute_sell_order(coin_info, quantity, market_info)
+        success = self._execute_sell_order(coin_info, quantity, market_info)
         if success and len(signal_parts) == 3:
             await self._send_sell_notification(signal_parts[0])
 
-    async def _prepare_sell_quantity(self, coin_info: dict) -> Optional[float]:
-        """Подготовка количества для продажи"""
+    def _prepare_sell_quantity(self, coin_info: dict) -> Optional[float]:
         try:
             quantity = self.asset_manager.get_asset_quantity(coin_info["coin"])
-            return self.order_manager.round_down(float(quantity), coin_info["decimals"])
+            return round(float(quantity), coin_info["decimals"])
         except Exception as e:
             print(f"Ошибка при подготовке количества для продажи: {e}")
             return None
 
-    async def _execute_sell_order(
-        self, 
-        coin_info: dict, 
-        quantity: float, 
-        market_info: List[dict]
-    ) -> bool:
-        """Выполнение ордера на продажу"""
+    def _execute_sell_order(self, coin_info: dict, quantity: float, market_info: List[dict]) -> bool:
         try:
-            order_id = await self.order_manager.sell(coin_info["coin"], quantity)
+            order_id = self.order_manager.sell(coin_info["coin"], quantity)
             if order_id:
                 coin_info["in_trade"] = False
                 self.config.write_json(market_info)
@@ -250,50 +237,44 @@ class TradingSignalProcessor:
         if coin_info["in_trade"]:
             return
 
-        trade_amount = await self._calculate_trade_amount(market_info)
+        trade_amount = self._calculate_trade_amount(market_info)
         if not trade_amount:
             return
 
-        success = await self._execute_buy_order(coin_info, trade_amount, market_info)
+        success = self._execute_buy_order(coin_info, trade_amount, market_info)
         if success:
             await self._send_buy_notification(coin_info, trade_amount)
 
-    async def _calculate_trade_amount(self, market_info: List[dict]) -> Optional[float]:
+    def _calculate_trade_amount(self, market_info: List[dict]) -> Optional[float]:
         """Расчет суммы для торговли"""
         try:
             settings = self.config.read_json("settings")
             usdt_balance = self.asset_manager.get_asset_quantity("USDT")
 
-            if (not settings or not settings.get("useFixDeposit", False)):
+            if not settings or not settings.get("useFixDeposit", False):
                 coins_not_in_trade = sum(1 for coin in market_info if not coin["in_trade"])
                 coef = 0.95 / max(coins_not_in_trade, 1)
-                amount = self.order_manager.round_down(float(usdt_balance) * coef, 2)
+                amount = round(float(usdt_balance) * coef, 2)
             else:
                 amount = float(settings["fixDeposit"])
 
             return max(amount, 5.02)
         except Exception as e:
             print(f"Ошибка при расчете суммы для торговли: {e}")
-            self.bot.send_message(creds.TELEGRAM_ID, f"Ошибка при расчете суммы для торговли: {e}")
-            return None
+            #в качестве дебага
+            return 7.0
 
-    async def _execute_buy_order(
-        self, 
-        coin_info: dict, 
-        amount: float, 
-        market_info: List[dict]
-    ) -> bool:
-        """Выполнение ордера на покупку"""
+    def _execute_buy_order(self, coin_info: dict, amount: float, market_info: List[dict]) -> bool:
         try:
-            order_id = await self.order_manager.buy(coin_info["coin"], amount)
+            order_id = self.order_manager.buy(coin_info["coin"], amount)
             if order_id:
                 coin_info["in_trade"] = True
                 self.config.write_json(market_info)
                 return True
             return False
         except Exception as e:
-            print(f"Ошибка при выполнении ордера на покупку: {e}")
-            self.bot.send_message(creds.TELEGRAM_ID, f"Ошибка при выполнении ордера на покупку: {e}")
+            error_msg = f"Ошибка при выполнении ордера на покупку: {e}"
+            print(error_msg)
             return False
 
     async def _send_buy_notification(self, coin_info: dict, amount: float) -> None:

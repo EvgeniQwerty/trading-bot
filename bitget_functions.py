@@ -45,7 +45,7 @@ class OrderManager:
             print(response)
             return response["data"]["orderId"]
         except BitgetAPIException as e:
-            print(f"error: {e.message}")
+            print(f"Error: {e.message}")
             return ""
 
     def buy(self, coin: str, size: float) -> str:
@@ -60,36 +60,36 @@ class OrderManager:
             print(response)
             return response
         except BitgetAPIException as e:
-            print(f"error: {e.message}")
-            return ""
+            print(f"Error: {e.message}")
+            return {}
 
 class AssetManager:
     def __init__(self, account_api, market_api):
         self.account_api = account_api
         self.market_api = market_api
 
-    def get_asset(self, coin: str) -> str:
+    def get_asset_quantity(self, coin: str) -> float:
         try:
             response = self.account_api.assets({"coin": coin})
-            return response["data"][0]["available"]
+            return float(response["data"][0]["available"])
         except BitgetAPIException as e:
-            print(f"error: {e.message}")
-            return ""
+            print(f"Error: {e.message}")
+            return 0.0
 
-    def get_ticker_price(self, coin: str) -> str:
+    def get_ticker_price(self, coin: str) -> float:
         try:
             response = self.market_api.tickers({"symbol": f"{coin}USDT"})
-            return response["data"][0]["lastPr"]
+            return float(response["data"][0]["lastPr"])
         except BitgetAPIException as e:
-            print(f"error: {e.message}")
-            return ""
+            print(f"Error: {e.message}")
+            return 0.0
 
     def get_all_assets(self) -> List:
         try:
             return self.account_api.assets({})["data"]
         except BitgetAPIException as e:
-            print(f"error: {e.message}")
-            return ""
+            print(f"Error: {e.message}")
+            return []
 
     def format_assets_message(self, assets: List) -> str:
         format_message = "Монеты на аккаунте:\n"
@@ -101,7 +101,7 @@ class AssetManager:
 
             if asset["coin"] != "USDT":
                 price = self.get_ticker_price(asset["coin"])
-                size = round(float(price) * float(asset["available"]), 2)
+                size = round(price * float(asset["available"]), 2)
                 format_message += f"💵{float(asset['available'])} {asset['coin']} ~= {size} USDT💵\n"
             else:
                 usdt_message += f"💲{round(float(asset['available']), 2)} {asset['coin']}💲\n"
