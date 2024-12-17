@@ -201,7 +201,8 @@ class TradingSignalProcessor:
     def _prepare_sell_quantity(self, coin_info: dict) -> Optional[float]:
         try:
             quantity = self.asset_manager.get_asset_quantity(coin_info["coin"])
-            return round(float(quantity), coin_info["decimals"])
+            adjusted_quantity = quantity * 0.99  
+            return round(float(adjusted_quantity), coin_info["decimals"])
         except Exception as e:
             print(f"Ошибка при подготовке количества для продажи: {e}")
             return None
@@ -251,17 +252,16 @@ class TradingSignalProcessor:
             settings = self.config.read_json("settings")
             usdt_balance = self.asset_manager.get_asset_quantity("USDT")
 
-            if not settings or not settings.get("useFixDeposit", False):
-                coins_not_in_trade = sum(1 for coin in market_info if not coin["in_trade"])
-                coef = 0.95 / max(coins_not_in_trade, 1)
-                amount = round(float(usdt_balance) * coef, 2)
-            else:
-                amount = float(settings["fixDeposit"])
-
+            if settings.get("useFixDeposit"):
+                return float(settings["fixDeposit"])
+        
+            coins_not_in_trade = sum(1 for coin in market_info if not coin["in_trade"])
+            coef = 0.95 / max(coins_not_in_trade, 1)
+            amount = round(float(usdt_balance) * coef, 2)
+        
             return max(amount, 5.02)
         except Exception as e:
             print(f"Ошибка при расчете суммы для торговли: {e}")
-            #в качестве дебага
             return 7.0
 
     def _execute_buy_order(self, coin_info: dict, amount: float, market_info: List[dict]) -> bool:

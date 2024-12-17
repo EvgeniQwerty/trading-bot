@@ -31,27 +31,51 @@ class OrderManager:
         self.order_api = order_api
 
     def _create_order_params(self, coin: str, side: str, size: float) -> Dict:
+        """
+        Создаем параметры ордера с учетом требований API.
+        Для market buy - size в USDT
+        Для market sell - size в базовой монете
+        """
         return {
             "symbol": f"{coin}USDT",
             "side": side,
             "orderType": "market",
-            "size": str(size)
+            "size": str(size),
+            "force": "ioc"
         }
 
     def execute_order(self, coin: str, size: float, side: str) -> str:
         try:
             params = self._create_order_params(coin, side, size)
+            print(f"Executing {side} order for {coin}")
+            print(f"Order params: {params}")
+            
             response = self.order_api.placeOrder(params)
-            print(response)
-            return response["data"]["orderId"]
-        except BitgetAPIException as e:
-            print(f"Error: {e.message}")
+            print(f"Order response: {response}")
+            
+            if response.get("code") == "00000":
+                return response["data"]["orderId"]
+            else:
+                print(f"Error placing order: {response.get('msg')}")
+                return ""
+        except Exception as e:
+            print(f"Error: {e}")
             return ""
 
     def buy(self, coin: str, size: float) -> str:
+        """
+        Создает ордер на покупку
+        :param coin: Торговая пара (например, 'BTC')
+        :param size: Количество USDT для покупки
+        """
         return self.execute_order(coin, size, "buy")
 
     def sell(self, coin: str, size: float) -> str:
+        """
+        Создает ордер на продажу
+        :param coin: Торговая пара (например, 'BTC')
+        :param size: Количество монеты для продажи
+        """
         return self.execute_order(coin, size, "sell")
 
     def get_order_info(self, order_id: str) -> Dict:
