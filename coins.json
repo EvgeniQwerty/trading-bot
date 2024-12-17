@@ -1,7 +1,52 @@
 [
     {
-        "coin": "TONCOIN",
+        "coin": "TON",
         "decimals": 2,
+        "in_trade": false
+    },
+    {
+        "coin": "OP",
+        "decimals": 2,
+        "in_trade": false
+    },
+    {
+        "coin": "APT",
+        "decimals": 2,
+        "in_trade": false
+    },
+    {
+        "coin": "SOL",
+        "decimals": 2,
+        "in_trade": false
+    },
+    {
+        "coin": "ZRO",
+        "decimals": 2,
+        "in_trade": false
+    },
+    {
+        "coin": "ARB",
+        "decimals": 2,
+        "in_trade": false
+    },
+    {
+        "coin": "ZK",
+        "decimals": 2,
+        "in_trade": false
+    },
+    {
+        "coin": "SUI",
+        "decimals": 2,
+        "in_trade": false
+    },
+    {
+        "coin": "RUNE",
+        "decimals": 3,
+        "in_trade": false
+    },
+    {
+        "coin": "AAVE",
+        "decimals": 4,
         "in_trade": false
     }
 ]
